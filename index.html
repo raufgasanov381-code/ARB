@@ -30,6 +30,8 @@ header{display:flex;align-items:flex-end;justify-content:flex-end;gap:12px;flex-
 .row .lab{font:400 11px var(--mono);color:var(--mut);min-width:92px;text-transform:uppercase;letter-spacing:.06em}
 .chip{border:1px solid var(--line);background:transparent;color:var(--ink);padding:6px 11px;font:400 12px var(--mono);text-transform:uppercase;letter-spacing:.03em;cursor:pointer}
 .chip:hover{border-color:var(--lime)}
+.chip.zero{opacity:.45}
+.chip.on.zero{opacity:1}
 .chip.on{background:var(--lime);color:var(--limeink);border-color:var(--lime);font-weight:700}
 input[type=number],input[type=text],select{font:400 14px var(--mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:0;padding:8px 10px;width:96px}
 select{width:auto}
@@ -37,7 +39,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
 .card{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--lime);padding:16px;margin-bottom:12px}
 .card[data-fb]{border-left-color:var(--mut)}
 .top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.ev{font:700 clamp(22px,5vw,28px)/1.05 var(--head);text-transform:uppercase;letter-spacing:.01em}
+.ev{cursor:pointer;-webkit-tap-highlight-color:transparent;font:700 clamp(22px,5vw,28px)/1.05 var(--head);text-transform:uppercase;letter-spacing:.01em}
 .meta{color:var(--mut);font:400 12px var(--mono);margin-top:5px;text-transform:uppercase;letter-spacing:.04em}
 .meta b{color:var(--lime);font-weight:700}
 .pct{background:var(--lime);color:var(--limeink);font:700 28px/1 var(--head);padding:7px 11px;white-space:nowrap}
@@ -49,6 +51,9 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
 .bet .st{color:var(--ink);font:400 14px var(--mono);min-width:84px;text-align:right;font-variant-numeric:tabular-nums}
 .calc{margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:var(--mut);font:400 12px var(--mono);text-transform:uppercase}
 .calc b{color:var(--lime)}
+.ev:hover{color:var(--lime)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--lime);color:var(--limeink);font:700 14px var(--mono);text-transform:uppercase;padding:10px 16px;z-index:9;opacity:0;pointer-events:none;transition:opacity .15s}
+.toast.on{opacity:1}
 .empty,.msg{text-align:center;color:var(--mut);padding:48px 10px;font:400 13px var(--mono);text-transform:uppercase}
 .banner{border:1px dashed var(--warn);color:var(--warn);padding:10px 12px;margin-bottom:14px;font:400 12px/1.5 var(--mono)}
 .warn{color:var(--warn);font:400 12px var(--mono);margin-top:8px}
@@ -80,25 +85,26 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
     <button class="tab" data-m="freebet">Фрибет</button>
   </div>
   <div class="filters">
-    <div class="row"><span class="lab">Прибыль от</span><input id="minp" type="number" step="0.1" value="0"><span class="meta">%</span>
-      <span id="pp" class="row"></span></div>
+    <div class="row"><span class="lab">Прибыль, %</span><span class="meta" style="margin:0">от</span><input id="minp" type="number" step="0.1" value="0"><span class="meta" style="margin:0">до</span><input id="maxp" type="number" step="0.1" placeholder="∞"></div>
+    <div class="row"><span class="lab">Быстро</span><span id="pp" class="row"></span></div>
     <div class="row"><span class="lab">Сортировка</span>
       <select id="sort"><option value="time">по времени матча</option><option value="pct">по прибыли</option></select></div>
-    <div class="row"><span class="lab">1-я БК</span><span id="f1" class="row"></span></div>
-    <div class="row"><span class="lab">2-я БК</span><span id="f2" class="row"></span></div>
-    <div class="row"><span class="lab">Когда</span><button class="chip" id="today">Только сегодня</button><span class="meta" id="count"></span></div>
+    <div class="row"><span class="lab" id="l1">1-я БК</span><span id="f1" class="row"></span></div>
+    <div class="row"><span class="lab" id="l2">2-я БК</span><span id="f2" class="row"></span></div>
+    <div class="row"><span class="lab">Когда</span><button class="chip" id="today">Только сегодня</button><span class="meta" id="count"></span><button class="chip" id="reset" style="margin-left:auto">Сбросить фильтры</button></div>
   </div>
   <div id="list"></div>
+  <div class="toast" id="toast" role="status"></div>
   <div class="foot"><a href="#" id="logout">Сменить код</a></div>
   </div>
 </div>
 <script>
 const MSK="Europe/Moscow",POLL=75000,STALE=300;
-let DATA=null,mode="cash",bk1=new Set(),bk2=new Set(),today=false,amounts={},minp={cash:0,freebet:0};
+let DATA=null,mode="cash",bk1=new Set(),bk2=new Set(),today=false,amounts={},minp={cash:0,freebet:0},maxp={cash:0,freebet:0};
 const PRESET={cash:[0,0.5,1,2,3,5,10],freebet:[0,10,20,30,40,50,60,70,80,90]};
 try{const s=JSON.parse(localStorage.getItem("arbf")||"{}");mode=s.mode||mode;today=!!s.today;bk1=new Set(s.bk1||[]);bk2=new Set(s.bk2||[]);
-  minp=Object.assign(minp,s.minp&&typeof s.minp==="object"?s.minp:{});document.getElementById("sort").value=s.sort||"time";amounts=s.amounts||{}}catch(e){}
-function save(){try{localStorage.setItem("arbf",JSON.stringify({mode,today,bk1:[...bk1],bk2:[...bk2],minp,sort:document.getElementById("sort").value,amounts}))}catch(e){}}
+  minp=Object.assign(minp,s.minp&&typeof s.minp==="object"?s.minp:{});maxp=Object.assign(maxp,s.maxp&&typeof s.maxp==="object"?s.maxp:{});document.getElementById("sort").value=s.sort||"time";amounts=s.amounts||{}}catch(e){}
+function save(){try{localStorage.setItem("arbf",JSON.stringify({mode,today,bk1:[...bk1],bk2:[...bk2],minp,maxp,sort:document.getElementById("sort").value,amounts}))}catch(e){}}
 function repoPath(){
   const q=new URLSearchParams(location.search).get("repo");if(q)return q;
   const m=location.hostname.match(/^(.+)\.github\.io$/);const p=location.pathname.split("/").filter(Boolean)[0];
@@ -165,9 +171,9 @@ async function load(){
   }else DATA=raw;
   showApp();render()}
 function names(){return DATA?DATA.bk:{}}
-function chips(id,set,list){
+function chips(id,set,list,cnt){
   const el=document.getElementById(id);
-  el.innerHTML=Object.entries(list).map(([k,v])=>`<button class="chip${set.has(k)?" on":""}" data-k="${k}">${esc(v)}</button>`).join("");
+  el.innerHTML=Object.entries(list).map(([k,v])=>`<button class="chip${set.has(k)?" on":""}${cnt[k]?"":" zero"}" data-k="${k}">${esc(v)} · ${cnt[k]||0}</button>`).join("");
   el.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{const k=b.dataset.k;set.has(k)?set.delete(k):set.add(k);save();render()})}
 function calc(a,amount){
   const st=a.bets;
@@ -179,7 +185,7 @@ function card(a){
   const c=calc(a,amt);
   const names_=names();
   const bets=a.bets.map((b,i)=>`<div class="bet"><span class="bk">${esc(names_[b.bk]||b.bk)}${a.mode==="freebet"&&i===0?" (фрибет)":""}</span><span>${esc(b.o)}</span><span class="k">${b.k.toFixed(2)}</span><span class="st" data-st="${i}">${money(c.rows[i])}</span></div>`).join("");
-  return `<div class="card" data-id="${a.id}"${a.mode==="freebet"?" data-fb":""}><div class="top"><div><div class="ev">${esc(a.home)} — ${esc(a.away)}</div>
+  return `<div class="card" data-id="${a.id}"${a.mode==="freebet"?" data-fb":""}><div class="top"><div><div class="ev" data-copy="${esc(a.home)} — ${esc(a.away)}" title="Нажмите, чтобы скопировать название матча" role="button" tabindex="0">${esc(a.home)} — ${esc(a.away)}</div>
   <div class="meta">${esc(a.league)} // ${esc(a.sport)}</div><div class="meta"><b>${when(a.start)}</b></div></div>
   <div class="pct${a.mode==="cash"&&a.pct>5?" hi":""}">${a.pct.toFixed(2)}%</div></div>
   <div class="bets">${bets}</div>
@@ -194,14 +200,17 @@ function render(){
   document.getElementById("st").textContent=age<90?"обновлено только что":`обновлено ${Math.round(age/60)} мин назад`;
   document.getElementById("banner").innerHTML=age>STALE?`<div class="banner">Данные не обновлялись ${Math.round(age/60)} мин — бот на телефоне, возможно, остановлен или БК недоступны. Коэффициенты могли устареть.</div>`:"";
   const all=DATA.arbs.filter(a=>a.mode===mode);
-  const present=i=>[...new Set(all.map(a=>a.bets[i]&&a.bets[i].bk).filter(Boolean))];
-  const nm=names();const l1={},l2={};present(0).forEach(k=>l1[k]=nm[k]||k);present(1).forEach(k=>l2[k]=nm[k]||k);
-  chips("f1",bk1,l1);chips("f2",bk2,l2);
-  const mp=minp[mode]||0,now=Date.now()/1000,tk=dayKey(now);
-  document.getElementById("minp").value=mp;
+  const nm=names(),all_=Object.keys(nm).filter(k=>k!=="fonbet"||true),c1={},c2={};
+  all.forEach(a=>{if(a.bets[0])c1[a.bets[0].bk]=(c1[a.bets[0].bk]||0)+1;if(a.bets[1])c2[a.bets[1].bk]=(c2[a.bets[1].bk]||0)+1});
+  const lst={};all_.forEach(k=>lst[k]=nm[k]);
+  document.getElementById("l1").textContent=mode==="freebet"?"Фрибет на":"1-я БК";
+  document.getElementById("l2").textContent=mode==="freebet"?"Ставка против":"2-я БК";
+  chips("f1",bk1,lst,c1);chips("f2",bk2,lst,c2);
+  const mp=minp[mode]||0,xp=maxp[mode]||0,now=Date.now()/1000,tk=dayKey(now);
+  document.getElementById("minp").value=mp;document.getElementById("maxp").value=xp||"";
   document.getElementById("pp").innerHTML=PRESET[mode].map(x=>`<button class="chip${Math.abs(mp-x)<1e-9?" on":""}" data-p="${x}">${x?"от "+x+"%":"любая"}</button>`).join("");
   document.querySelectorAll("#pp .chip").forEach(b=>b.onclick=()=>{minp[mode]=parseFloat(b.dataset.p);save();render()});
-  let list=all.filter(a=>a.start>now&&a.pct>=mp&&(!bk1.size||bk1.has(a.bets[0].bk))&&(!bk2.size||(a.bets[1]&&bk2.has(a.bets[1].bk)))&&(!today||dayKey(a.start)===tk));
+  let list=all.filter(a=>a.start>now&&a.pct>=mp&&(!xp||a.pct<=xp)&&(!bk1.size||bk1.has(a.bets[0].bk))&&(!bk2.size||(a.bets[1]&&bk2.has(a.bets[1].bk)))&&(!today||dayKey(a.start)===tk));
   const s=document.getElementById("sort").value;
   list.sort(s==="pct"?(x,y)=>y.pct-x.pct:(x,y)=>x.start-y.start||y.pct-x.pct);
   document.getElementById("count").textContent=`Найдено: ${list.length}`;
@@ -214,7 +223,17 @@ function render(){
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{mode=t.dataset.m;bk1.clear();bk2.clear();save();render()});
 document.getElementById("today").onclick=()=>{today=!today;save();render()};
 document.getElementById("minp").onchange=()=>{minp[mode]=parseFloat(document.getElementById("minp").value)||0;save();render()};
+document.getElementById("maxp").onchange=()=>{maxp[mode]=parseFloat(document.getElementById("maxp").value)||0;save();render()};
+document.getElementById("reset").onclick=()=>{bk1.clear();bk2.clear();today=false;minp[mode]=0;maxp[mode]=0;save();render()};
 document.getElementById("sort").onchange=()=>{save();render()};
+let toastT;
+function toast(m){const e=document.getElementById("toast");e.textContent=m;e.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove("on"),1600)}
+async function copyText(s){
+  try{await navigator.clipboard.writeText(s);return true}catch(e){}
+  try{const a=document.createElement("textarea");a.value=s;a.style.cssText="position:fixed;opacity:0";document.body.appendChild(a);a.select();const ok=document.execCommand("copy");a.remove();return ok}catch(e){return false}}
+document.getElementById("list").addEventListener("click",async e=>{const el=e.target.closest(".ev[data-copy]");if(!el)return;
+  toast(await copyText(el.dataset.copy)?"Скопировано: "+el.dataset.copy:"Не удалось скопировать")});
+document.getElementById("list").addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.matches(".ev[data-copy]")){e.preventDefault();e.target.click()}});
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)load()});
 load();setInterval(load,POLL);setInterval(()=>DATA&&render(),30000);
 </script>
