@@ -112,6 +112,7 @@ function repoPath(){
 const REPO=repoPath(),BR=new URLSearchParams(location.search).get("branch")||"data";
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const money=x=>Math.round(x).toLocaleString("ru-RU")+" ₽";
+const stk=(b,v)=>b.bk==="polymarket"&&DATA&&DATA.usd?"$"+(v/DATA.usd).toFixed(2)+" · "+money(v):money(v);
 const dayKey=t=>new Date(t*1000).toLocaleDateString("sv-SE",{timeZone:MSK});
 function when(t){
   const d=new Date(t*1000),hm=d.toLocaleTimeString("ru-RU",{timeZone:MSK,hour:"2-digit",minute:"2-digit"});
@@ -184,7 +185,7 @@ function card(a){
   const amt=amounts[a.id]||(a.mode==="freebet"?a.base||1000:1000);
   const c=calc(a,amt);
   const names_=names();
-  const bets=a.bets.map((b,i)=>`<div class="bet"><span class="bk">${esc(names_[b.bk]||b.bk)}${a.mode==="freebet"&&i===0?" (фрибет)":""}</span><span>${esc(b.o)}</span><span class="k">${b.k.toFixed(2)}</span><span class="st" data-st="${i}">${money(c.rows[i])}</span></div>`).join("");
+  const bets=a.bets.map((b,i)=>`<div class="bet"><span class="bk">${esc(names_[b.bk]||b.bk)}${a.mode==="freebet"&&i===0?" (фрибет)":""}</span><span>${esc(b.o)}</span><span class="k">${b.k.toFixed(2)}</span><span class="st" data-st="${i}">${stk(b,c.rows[i])}</span></div>`).join("");
   return `<div class="card" data-id="${a.id}"${a.mode==="freebet"?" data-fb":""}><div class="top"><div><div class="ev" data-copy="${esc(a.home)} — ${esc(a.away)}" title="Нажмите, чтобы скопировать название матча" role="button" tabindex="0">${esc(a.home)} — ${esc(a.away)}</div>
   <div class="meta">${esc(a.league)} // ${esc(a.sport)}</div><div class="meta"><b>${when(a.start)}</b></div></div>
   <div class="pct${a.mode==="cash"&&a.pct>5?" hi":""}">${a.pct.toFixed(2)}%</div></div>
@@ -218,7 +219,7 @@ function render(){
   document.querySelectorAll("[data-amt]").forEach(inp=>inp.oninput=()=>{
     const a=DATA.arbs.find(x=>x.id===inp.dataset.amt);const v=parseFloat(inp.value);if(!a||!(v>0))return;
     amounts[a.id]=v;save();const c=calc(a,v),card=inp.closest(".card");
-    card.querySelectorAll("[data-st]").forEach(e=>e.textContent=money(c.rows[+e.dataset.st]));
+    card.querySelectorAll("[data-st]").forEach(e=>e.textContent=stk(a.bets[+e.dataset.st],c.rows[+e.dataset.st]));
     card.querySelector("[data-prof]").parentElement.innerHTML=`Прибыль: <b data-prof>${money(c.profit)}</b> (${c.pct.toFixed(1)}%)`})}
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{mode=t.dataset.m;bk1.clear();bk2.clear();save();render()});
 document.getElementById("today").onclick=()=>{today=!today;save();render()};
