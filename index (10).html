@@ -100,14 +100,14 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
       <select id="sort"><option value="time">по времени матча</option><option value="pct">по прибыли</option></select></div>
     <div class="row"><span class="lab" id="l1">1-я БК</span><span id="f1" class="row"></span></div>
     <div class="row"><span class="lab" id="l2">2-я БК</span><span id="f2" class="row"></span></div>
-    <div class="row"><span class="lab">Когда</span><button class="chip" id="today">Только сегодня</button><span class="meta" id="count"></span><button class="chip" id="reset" style="margin-left:auto">Сбросить фильтры</button></div>
+    <div class="row"><span class="lab">Когда</span><button class="chip" id="today">Только сегодня</button><span class="meta" id="count"></span><button class="chip" id="admopen2" style="margin-left:auto">⚙ Настройки парсера</button><button class="chip" id="reset">Сбросить фильтры</button></div>
   </div>
   <div id="list"></div>
   <div class="toast" id="toast" role="status"></div>
   <div class="foot"><a href="#" id="logout">Сменить код</a> · <a href="#" id="admopen">Настройки парсера</a></div>
   <div id="adm" role="dialog" aria-label="Настройки парсера"><div class="box">
     <h3>Настройки парсера</h3>
-    <div class="sm">Для администратора. Коэффициент ставки на каждой БК будет только в заданных границах; пусто = без ограничения. Телефон подхватывает настройки за ~30 секунд и сразу пересчитывает вилки.</div>
+    <div class="sm">Для администратора. Действует только на ФРИБЕТНЫЕ вилки: коэффициент ставки на каждой БК будет в заданных границах; пусто = без ограничения. Денежные вилки берут любые коэффициенты. Телефон подхватывает настройки за ~30 секунд и сразу пересчитывает вилки.</div>
     <div class="row"><span class="lab">Токен GitHub</span><input id="admtok" type="password" autocomplete="off" placeholder="github_pat_…" style="width:100%;max-width:340px"></div>
     <div class="sm">Токен только на этот репозиторий, право Contents: Read and write. Хранится в этом браузере и отправляется только в GitHub.</div>
     <div class="hd"><span>БК</span><span>Коэф. от</span><span>Коэф. до</span></div>
@@ -266,7 +266,7 @@ async function admSave(){try{
   const cur=await admApi("GET");const body={message:"settings",branch:BR,content:b64u(JSON.stringify({bk_odds,updated:Math.floor(Date.now()/1000)}))};if(cur)body.sha=cur.sha;
   await admApi("PUT",body);try{localStorage.setItem("arbadm",admEl("admtok").value.trim())}catch(e){}
   admSt("Сохранено. Телефон применит настройки в течение ~30 секунд.")}catch(e){admSt(e.message,1)}}
-admEl("admopen").onclick=e=>{e.preventDefault();let t="";try{t=localStorage.getItem("arbadm")||""}catch(x){}admEl("admtok").value=t;admRows({});admEl("adm").style.display="block";admSt("");if(t)admLoad()};
+admEl("admopen").onclick=admEl("admopen2").onclick=e=>{e.preventDefault();let t="";try{t=localStorage.getItem("arbadm")||""}catch(x){}admEl("admtok").value=t;admRows({});admEl("adm").style.display="block";admSt("");if(t)admLoad()};
 admEl("admclose").onclick=()=>admEl("adm").style.display="none";
 admEl("admsave").onclick=admSave;admEl("admload").onclick=admLoad;
 admEl("admclear").onclick=()=>{admRows({});admSt("Поля очищены — нажмите «Сохранить», чтобы снять ограничения.")};
