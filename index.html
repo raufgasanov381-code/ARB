@@ -60,6 +60,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
 #adm .r span.n{font:700 13px var(--mono);text-transform:uppercase;color:var(--lime)}
 #adm .hd{display:grid;grid-template-columns:1fr 84px 84px;gap:8px;color:var(--mut);font:400 11px var(--mono);text-transform:uppercase;margin-top:12px}
 #adm .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+#phl .ph{border:1px solid var(--line);padding:10px;margin-top:10px}
+#phl .ph b{font:700 15px var(--head);text-transform:uppercase;color:var(--lime)}
+#phl .ph .m{color:var(--mut);font:400 12px/1.6 var(--mono)}
+#phl .ph .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 #adm .sm{color:var(--mut);font:400 12px/1.5 var(--mono);margin:8px 0}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--lime);color:var(--limeink);font:700 14px var(--mono);text-transform:uppercase;padding:10px 16px;z-index:9;opacity:0;pointer-events:none;transition:opacity .15s}
 .toast.on{opacity:1}
@@ -107,13 +111,19 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
   <div class="foot"><a href="#" id="logout">Сменить код</a> · <a href="#" id="admopen">Настройки парсера</a></div>
   <div id="adm" role="dialog" aria-label="Настройки парсера"><div class="box">
     <h3>Настройки парсера</h3>
-    <div class="sm">Для администратора. Действует только на ФРИБЕТНЫЕ вилки: коэффициент ставки на каждой БК будет в заданных границах; пусто = без ограничения. Денежные вилки берут любые коэффициенты. Телефон подхватывает настройки за ~30 секунд и сразу пересчитывает вилки.</div>
+    <div class="sm">Для администратора. Отдельно для фрибетных и денежных вилок: коэффициент ставки на каждой БК будет в заданных границах; пусто = без ограничения. Телефон подхватывает настройки за ~30 секунд и сразу пересчитывает вилки.</div>
     <div class="row"><span class="lab">Токен GitHub</span><input id="admtok" type="password" autocomplete="off" placeholder="github_pat_…" style="width:100%;max-width:340px"></div>
     <div class="sm">Токен только на этот репозиторий, право Contents: Read and write. Хранится в этом браузере и отправляется только в GitHub.</div>
+    <div class="row" style="margin-top:12px"><button class="chip on" id="admtf">Фрибет</button><button class="chip" id="admtc">Денежные</button></div>
     <div class="hd"><span>БК</span><span>Коэф. от</span><span>Коэф. до</span></div>
     <div id="admrows"></div>
     <div class="acts"><button class="chip on" id="admsave">Сохранить на телефон</button><button class="chip" id="admload">Загрузить текущие</button><button class="chip" id="admclear">Очистить всё</button><button class="chip" id="admclose" style="margin-left:auto">Закрыть</button></div>
     <div class="sm" id="admst"></div>
+    <h3 style="margin-top:22px;font-size:18px">Телефоны</h3>
+    <div class="sm">Новый телефон ставится одной командой, появляется здесь сам. Выберите ему БК и нажмите «Старт».</div>
+    <div id="phl"></div>
+    <div class="acts"><button class="chip" id="phref">Обновить список</button><button class="chip on" id="phsave">Сохранить назначения</button></div>
+    <div class="sm" id="phst"></div>
   </div></div></div>
   </div>
 </div>
@@ -247,10 +257,13 @@ document.getElementById("maxp").onchange=()=>{maxp[mode]=parseFloat(document.get
 const ADM_BKS={fonbet:"Фонбет",winline:"Винлайн",betboom:"БетБум",betcity:"Бетсити",leon:"Леон",ligastavok:"Лига Ставок",olimp:"Олимп",polymarket:"Polymarket",onewin:"1win",marathon:"Марафон"};
 const admEl=id=>document.getElementById(id);
 function admSt(t,bad){const e=admEl("admst");e.textContent=t;e.style.color=bad?"var(--bad)":"var(--mut)"}
+let ADMM="freebet",ADMD={freebet:{},cash:{}};
 function admRows(cur){
   const names=Object.assign({},ADM_BKS,DATA&&DATA.bk||{});
   admEl("admrows").innerHTML=Object.keys(names).map(k=>{const r=(cur||{})[k]||{};
     return `<div class="r"><span class="n">${esc(names[k])}</span><input type="number" step="0.01" min="1" data-k="${esc(k)}" data-f="min" value="${r.min||""}" placeholder="—"><input type="number" step="0.01" min="1" data-k="${esc(k)}" data-f="max" value="${r.max||""}" placeholder="—"></div>`}).join("")}
+function admStash(){ADMD[ADMM]=admRead()}
+function admTab(m){admStash();ADMM=m;admEl("admtf").classList.toggle("on",m==="freebet");admEl("admtc").classList.toggle("on",m==="cash");admRows(ADMD[m])}
 function admRead(){const o={};admEl("admrows").querySelectorAll("input").forEach(i=>{const v=parseFloat(i.value.replace(",","."));if(v>0){(o[i.dataset.k]=o[i.dataset.k]||{})[i.dataset.f]=v}});return o}
 const b64u=s=>btoa(unescape(encodeURIComponent(s)));
 async function admApi(method,body){
@@ -259,17 +272,50 @@ async function admApi(method,body){
   if(r.status===404&&method==="GET")return null;
   if(!r.ok)throw new Error(r.status===401||r.status===403?"токен не подходит (нужен доступ Contents: Read and write к этому репозиторию)":"GitHub: "+r.status);
   return r.json()}
-async function admLoad(){try{admSt("Загружаю…");const j=await admApi("GET");const cur=j?JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g,""))))).bk_odds:{};admRows(cur);admSt(j?"Загружены текущие настройки.":"Настроек пока нет — всё без ограничений.")}catch(e){admSt(e.message,1)}}
+async function admLoad(){try{admSt("Загружаю…");const j=await admApi("GET");const d=j?JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g,""))))):{};ADMD={freebet:d.bk_odds||{},cash:d.bk_odds_cash||{}};admRows(ADMD[ADMM]);admSt(j?"Загружены текущие настройки.":"Настроек пока нет — всё без ограничений.")}catch(e){admSt(e.message,1)}}
 async function admSave(){try{
-  admSt("Сохраняю…");const bk_odds=admRead();
-  for(const k in bk_odds){const r=bk_odds[k];if(r.min&&r.max&&r.min>r.max)throw new Error("«"+(ADM_BKS[k]||k)+"»: «от» больше «до»")}
-  const cur=await admApi("GET");const body={message:"settings",branch:BR,content:b64u(JSON.stringify({bk_odds,updated:Math.floor(Date.now()/1000)}))};if(cur)body.sha=cur.sha;
+  admSt("Сохраняю…");admStash();const bk_odds=ADMD.freebet,bk_odds_cash=ADMD.cash;
+  for(const o of [bk_odds,bk_odds_cash])for(const k in o){const r=o[k];if(r.min&&r.max&&r.min>r.max)throw new Error("«"+(ADM_BKS[k]||k)+"»: «от» больше «до»")}
+  const cur=await admApi("GET");const body={message:"settings",branch:BR,content:b64u(JSON.stringify({bk_odds,bk_odds_cash,updated:Math.floor(Date.now()/1000)}))};if(cur)body.sha=cur.sha;
   await admApi("PUT",body);try{localStorage.setItem("arbadm",admEl("admtok").value.trim())}catch(e){}
   admSt("Сохранено. Телефон применит настройки в течение ~30 секунд.")}catch(e){admSt(e.message,1)}}
-admEl("admopen").onclick=admEl("admopen2").onclick=e=>{e.preventDefault();let t="";try{t=localStorage.getItem("arbadm")||""}catch(x){}admEl("admtok").value=t;admRows({});admEl("adm").style.display="block";admSt("");if(t)admLoad()};
+admEl("admopen").onclick=admEl("admopen2").onclick=e=>{e.preventDefault();let t="";try{t=localStorage.getItem("arbadm")||""}catch(x){}admEl("admtok").value=t;ADMD={freebet:{},cash:{}};ADMM="freebet";admEl("admtf").classList.add("on");admEl("admtc").classList.remove("on");admRows({});admEl("adm").style.display="block";admSt("");if(t){admLoad();phLoad()}};
+
+const PH_BKS=["betcity","betboom","ligastavok","leon","olimp","marathon","onewin","polymarket"];
+let PHA={},PHSHA=null;
+const phEl=admEl("phst");function phSt(t,bad){phEl.textContent=t;phEl.style.color=bad?"var(--bad)":"var(--mut)"}
+async function ghGet(path,raw){const tok=admEl("admtok").value.trim();if(!tok)throw new Error("введите токен GitHub");
+  const r=await fetch(`https://api.github.com/repos/${REPO}/contents/${path}?ref=${BR}`,{cache:"no-store",headers:{Authorization:"Bearer "+tok,Accept:raw?"application/vnd.github.raw+json":"application/vnd.github+json"}});
+  if(r.status===404)return null;if(!r.ok)throw new Error("GitHub: "+r.status);return raw?r.text():r.json()}
+function phRender(list,last){
+  admEl("phl").innerHTML=list.length?list.map(d=>{const id=d.id,a=PHA[id]||{},age=Math.round((Date.now()/1000-d.t)/60),old=age>10,main=d.role==="main",ok=last&&d.v>=last;
+    const bks=main?"":`<div class="chips">${PH_BKS.map(b=>`<button class="chip${(a.bks||d.bks||[]).includes(b)?" on":""}" data-id="${esc(id)}" data-b="${b}">${esc(ADM_BKS[b]||b)}</button>`).join("")}</div>`;
+    const run=!(a.paused!==undefined?a.paused:d.paused);
+    return `<div class="ph"><b>${esc(id)}</b> <span class="m">${main?"главный":"работник"}</span>
+<div class="m">${esc(d.model||"?")} · Android ${esc(d.android||"?")} · версия ${d.v}${ok?" ✓":last?" (есть "+last+")":""}</div>
+<div class="m" style="${old?"color:var(--bad)":""}">${age<1?"только что":age+" мин назад"} · ${esc(d.status||"")}${d.counts?" · матчей: "+Object.entries(d.counts).map(([k,v])=>(ADM_BKS[k]||k)+" "+v).join(", "):""}</div>${bks}
+${main?"":`<div class="chips"><button class="chip${run?" on":""}" data-id="${esc(id)}" data-run="1">${run?"▶ Работает":"⏸ На паузе — запустить"}</button></div>`}</div>`}).join(""):'<div class="sm">Телефонов пока нет.</div>';
+  admEl("phl").querySelectorAll("button[data-b]").forEach(b=>b.onclick=()=>{const id=b.dataset.id,a=PHA[id]=PHA[id]||{};a.bks=a.bks||(PHLIST.find(x=>x.id===id).bks||[]).slice();const i=a.bks.indexOf(b.dataset.b);i<0?a.bks.push(b.dataset.b):a.bks.splice(i,1);phRender(PHLIST,PHLAST)});
+  admEl("phl").querySelectorAll("button[data-run]").forEach(b=>b.onclick=()=>{const id=b.dataset.id,a=PHA[id]=PHA[id]||{};const cur=a.paused!==undefined?a.paused:!!PHLIST.find(x=>x.id===id).paused;a.paused=!cur;phRender(PHLIST,PHLAST)})}
+let PHLIST=[],PHLAST=0;
+async function phLoad(){try{phSt("Загружаю…");
+  const dir=await ghGet("fleet");const files=(dir||[]).filter(f=>f.name.endsWith(".json"));
+  PHLIST=(await Promise.all(files.map(async f=>{try{return JSON.parse(await ghGet("fleet/"+f.name,1))}catch(e){return null}}))).filter(Boolean).sort((a,b)=>b.t-a.t);
+  const v=await ghGet("code/VERSION",1);PHLAST=parseInt(v)||0;
+  const fl=await ghGet("fleet.json");PHSHA=fl&&fl.sha;PHA={};
+  if(fl){const d=JSON.parse(decodeURIComponent(escape(atob(fl.content.replace(/\n/g,"")))));PHA=d.phones||{}}
+  phRender(PHLIST,PHLAST);phSt("")}catch(e){phSt(e.message,1)}}
+async function phSave(){try{phSt("Сохраняю…");const tok=admEl("admtok").value.trim();
+  const cur=await ghGet("fleet.json");const phones={};
+  for(const d of PHLIST){if(d.role==="main")continue;const a=PHA[d.id]||{};phones[d.id]={bks:a.bks||d.bks||[],paused:a.paused!==undefined?a.paused:!!d.paused}}
+  const body={message:"fleet",branch:BR,content:b64u(JSON.stringify({phones,updated:Math.floor(Date.now()/1000)}))};if(cur)body.sha=cur.sha;
+  const r=await fetch(`https://api.github.com/repos/${REPO}/contents/fleet.json`,{method:"PUT",headers:{Authorization:"Bearer "+tok,Accept:"application/vnd.github+json","Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok)throw new Error("GitHub: "+r.status);phSt("Сохранено. Телефоны подхватят за ~15 секунд.")}catch(e){phSt(e.message,1)}}
+admEl("phref").onclick=phLoad;admEl("phsave").onclick=phSave;
 admEl("admclose").onclick=()=>admEl("adm").style.display="none";
 admEl("admsave").onclick=admSave;admEl("admload").onclick=admLoad;
-admEl("admclear").onclick=()=>{admRows({});admSt("Поля очищены — нажмите «Сохранить», чтобы снять ограничения.")};
+admEl("admtf").onclick=()=>admTab("freebet");admEl("admtc").onclick=()=>admTab("cash");
+admEl("admclear").onclick=()=>{ADMD={freebet:{},cash:{}};admRows({});admSt("Поля очищены — нажмите «Сохранить», чтобы снять ограничения.")};
 document.getElementById("reset").onclick=()=>{bk1.clear();bk2.clear();today=false;minp[mode]=0;maxp[mode]=0;save();render()};
 document.getElementById("sort").onchange=()=>{save();render()};
 let toastT;
