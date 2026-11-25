@@ -52,6 +52,15 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
 .calc{margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:var(--mut);font:400 12px var(--mono);text-transform:uppercase}
 .calc b{color:var(--lime)}
 .ev:hover{color:var(--lime)}
+#adm{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:20;display:none;overflow:auto;padding:24px 16px}
+#adm .box{max-width:560px;margin:0 auto;background:var(--panel);border:1px solid var(--line);padding:18px 16px}
+#adm h3{margin:0 0 4px;font:700 22px var(--head);text-transform:uppercase}
+#adm .r{display:grid;grid-template-columns:1fr 84px 84px;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line)}
+#adm .r input{width:100%;box-sizing:border-box}
+#adm .r span.n{font:700 13px var(--mono);text-transform:uppercase;color:var(--lime)}
+#adm .hd{display:grid;grid-template-columns:1fr 84px 84px;gap:8px;color:var(--mut);font:400 11px var(--mono);text-transform:uppercase;margin-top:12px}
+#adm .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+#adm .sm{color:var(--mut);font:400 12px/1.5 var(--mono);margin:8px 0}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--lime);color:var(--limeink);font:700 14px var(--mono);text-transform:uppercase;padding:10px 16px;z-index:9;opacity:0;pointer-events:none;transition:opacity .15s}
 .toast.on{opacity:1}
 .empty,.msg{text-align:center;color:var(--mut);padding:48px 10px;font:400 13px var(--mono);text-transform:uppercase}
@@ -95,7 +104,17 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
   </div>
   <div id="list"></div>
   <div class="toast" id="toast" role="status"></div>
-  <div class="foot"><a href="#" id="logout">Сменить код</a></div>
+  <div class="foot"><a href="#" id="logout">Сменить код</a> · <a href="#" id="admopen">Настройки парсера</a></div>
+  <div id="adm" role="dialog" aria-label="Настройки парсера"><div class="box">
+    <h3>Настройки парсера</h3>
+    <div class="sm">Для администратора. Коэффициент ставки на каждой БК будет только в заданных границах; пусто = без ограничения. Телефон подхватывает настройки за ~30 секунд и сразу пересчитывает вилки.</div>
+    <div class="row"><span class="lab">Токен GitHub</span><input id="admtok" type="password" autocomplete="off" placeholder="github_pat_…" style="width:100%;max-width:340px"></div>
+    <div class="sm">Токен только на этот репозиторий, право Contents: Read and write. Хранится в этом браузере и отправляется только в GitHub.</div>
+    <div class="hd"><span>БК</span><span>Коэф. от</span><span>Коэф. до</span></div>
+    <div id="admrows"></div>
+    <div class="acts"><button class="chip on" id="admsave">Сохранить на телефон</button><button class="chip" id="admload">Загрузить текущие</button><button class="chip" id="admclear">Очистить всё</button><button class="chip" id="admclose" style="margin-left:auto">Закрыть</button></div>
+    <div class="sm" id="admst"></div>
+  </div></div></div>
   </div>
 </div>
 <script>
@@ -112,7 +131,7 @@ function repoPath(){
 const REPO=repoPath(),BR=new URLSearchParams(location.search).get("branch")||"data";
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const money=x=>Math.round(x).toLocaleString("ru-RU")+" ₽";
-const stk=(b,v)=>b.bk==="polymarket"&&DATA&&DATA.usd?"$"+(v/DATA.usd).toFixed(2)+" · "+money(v):money(v);
+const stk=(b,v)=>(b.bk==="polymarket"||b.bk==="onewin")&&DATA&&DATA.usd?"$"+(v/DATA.usd).toFixed(2)+" · "+money(v):money(v);
 const dayKey=t=>new Date(t*1000).toLocaleDateString("sv-SE",{timeZone:MSK});
 function when(t){
   const d=new Date(t*1000),hm=d.toLocaleTimeString("ru-RU",{timeZone:MSK,hour:"2-digit",minute:"2-digit"});
@@ -225,6 +244,32 @@ document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{mode=t.dataset.m;bk1
 document.getElementById("today").onclick=()=>{today=!today;save();render()};
 document.getElementById("minp").onchange=()=>{minp[mode]=parseFloat(document.getElementById("minp").value)||0;save();render()};
 document.getElementById("maxp").onchange=()=>{maxp[mode]=parseFloat(document.getElementById("maxp").value)||0;save();render()};
+const ADM_BKS={fonbet:"Фонбет",winline:"Винлайн",betboom:"БетБум",betcity:"Бетсити",leon:"Леон",ligastavok:"Лига Ставок",olimp:"Олимп",polymarket:"Polymarket",onewin:"1win",marathon:"Марафон"};
+const admEl=id=>document.getElementById(id);
+function admSt(t,bad){const e=admEl("admst");e.textContent=t;e.style.color=bad?"var(--bad)":"var(--mut)"}
+function admRows(cur){
+  const names=Object.assign({},ADM_BKS,DATA&&DATA.bk||{});
+  admEl("admrows").innerHTML=Object.keys(names).map(k=>{const r=(cur||{})[k]||{};
+    return `<div class="r"><span class="n">${esc(names[k])}</span><input type="number" step="0.01" min="1" data-k="${esc(k)}" data-f="min" value="${r.min||""}" placeholder="—"><input type="number" step="0.01" min="1" data-k="${esc(k)}" data-f="max" value="${r.max||""}" placeholder="—"></div>`}).join("")}
+function admRead(){const o={};admEl("admrows").querySelectorAll("input").forEach(i=>{const v=parseFloat(i.value.replace(",","."));if(v>0){(o[i.dataset.k]=o[i.dataset.k]||{})[i.dataset.f]=v}});return o}
+const b64u=s=>btoa(unescape(encodeURIComponent(s)));
+async function admApi(method,body){
+  const tok=admEl("admtok").value.trim();if(!tok)throw new Error("введите токен GitHub");
+  const r=await fetch(`https://api.github.com/repos/${REPO}/contents/settings.json`+(method==="GET"?`?ref=${BR}`:""),{method,cache:"no-store",headers:{Authorization:"Bearer "+tok,Accept:"application/vnd.github+json","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+  if(r.status===404&&method==="GET")return null;
+  if(!r.ok)throw new Error(r.status===401||r.status===403?"токен не подходит (нужен доступ Contents: Read and write к этому репозиторию)":"GitHub: "+r.status);
+  return r.json()}
+async function admLoad(){try{admSt("Загружаю…");const j=await admApi("GET");const cur=j?JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g,""))))).bk_odds:{};admRows(cur);admSt(j?"Загружены текущие настройки.":"Настроек пока нет — всё без ограничений.")}catch(e){admSt(e.message,1)}}
+async function admSave(){try{
+  admSt("Сохраняю…");const bk_odds=admRead();
+  for(const k in bk_odds){const r=bk_odds[k];if(r.min&&r.max&&r.min>r.max)throw new Error("«"+(ADM_BKS[k]||k)+"»: «от» больше «до»")}
+  const cur=await admApi("GET");const body={message:"settings",branch:BR,content:b64u(JSON.stringify({bk_odds,updated:Math.floor(Date.now()/1000)}))};if(cur)body.sha=cur.sha;
+  await admApi("PUT",body);try{localStorage.setItem("arbadm",admEl("admtok").value.trim())}catch(e){}
+  admSt("Сохранено. Телефон применит настройки в течение ~30 секунд.")}catch(e){admSt(e.message,1)}}
+admEl("admopen").onclick=e=>{e.preventDefault();let t="";try{t=localStorage.getItem("arbadm")||""}catch(x){}admEl("admtok").value=t;admRows({});admEl("adm").style.display="block";admSt("");if(t)admLoad()};
+admEl("admclose").onclick=()=>admEl("adm").style.display="none";
+admEl("admsave").onclick=admSave;admEl("admload").onclick=admLoad;
+admEl("admclear").onclick=()=>{admRows({});admSt("Поля очищены — нажмите «Сохранить», чтобы снять ограничения.")};
 document.getElementById("reset").onclick=()=>{bk1.clear();bk2.clear();today=false;minp[mode]=0;maxp[mode]=0;save();render()};
 document.getElementById("sort").onchange=()=>{save();render()};
 let toastT;
