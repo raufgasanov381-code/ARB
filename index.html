@@ -69,6 +69,11 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
 .toast.on{opacity:1}
 .empty,.msg{text-align:center;color:var(--mut);padding:48px 10px;font:400 13px var(--mono);text-transform:uppercase}
 .banner{border:1px dashed var(--warn);color:var(--warn);padding:10px 12px;margin-bottom:14px;font:400 12px/1.5 var(--mono)}
+.pinb{background:none;border:1px solid var(--line);color:var(--mut);font:400 12px var(--mono);padding:5px 9px;margin-top:8px;cursor:pointer}
+.pinb.on{border-color:var(--lime);color:var(--lime)}
+.card.gone{opacity:.6;border-left-color:var(--mut)}
+.pinst{font:400 12px var(--mono);margin-top:8px}.pinst.ok{color:var(--lime)}.pinst.bad{color:var(--warn)}
+#pins .hd2{font:700 18px var(--head);text-transform:uppercase;margin:8px 0 4px}#pins .sm2{color:var(--mut);font:400 12px/1.5 var(--mono);margin-bottom:10px}
 .warn{color:var(--warn);font:400 12px var(--mono);margin-top:8px}
 #lock{max-width:440px;margin:56px auto;position:relative}
 #lock .ev{font-size:34px;margin-bottom:6px}
@@ -106,6 +111,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
     <div class="row"><span class="lab" id="l2">2-я БК</span><span id="f2" class="row"></span></div>
     <div class="row"><span class="lab">Когда</span><button class="chip" id="today">Только сегодня</button><span class="meta" id="count"></span><button class="chip" id="admopen2" style="margin-left:auto">⚙ Настройки парсера</button><button class="chip" id="reset">Сбросить фильтры</button></div>
   </div>
+  <div id="pins"></div>
   <div id="list"></div>
   <div class="toast" id="toast" role="status"></div>
   <div class="foot"><a href="#" id="logout">Сменить код</a> · <a href="#" id="admopen">Настройки парсера</a></div>
@@ -114,6 +120,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--lime);outl
     <div class="sm">Для администратора. Отдельно для фрибетных и денежных вилок: коэффициент ставки на каждой БК будет в заданных границах; пусто = без ограничения. Телефон подхватывает настройки за ~30 секунд и сразу пересчитывает вилки.</div>
     <div class="row"><span class="lab">Токен GitHub</span><input id="admtok" type="password" autocomplete="off" placeholder="github_pat_…" style="width:100%;max-width:340px"></div>
     <div class="sm">Токен только на этот репозиторий, право Contents: Read and write. Хранится в этом браузере и отправляется только в GitHub.</div>
+    <div class="row" style="margin-top:12px"><span class="lab">Горизонт матчей</span><select id="admdays"><option value="">как в config.json</option><option value="1">1 день</option><option value="2">2 дня</option><option value="3">3 дня</option><option value="4">4 дня</option><option value="5">5 дней</option><option value="7">7 дней</option></select></div>
+    <div class="sm">На сколько дней вперёд искать вилки (у всех БК и всех телефонов). Больше дней — больше вилок, но цикл дольше; Бетсити отдаёт максимум 3 дня.</div>
     <div class="row" style="margin-top:12px"><button class="chip on" id="admtf">Фрибет</button><button class="chip" id="admtc">Денежные</button></div>
     <div class="hd"><span>БК</span><span>Коэф. от</span><span>Коэф. до</span></div>
     <div id="admrows"></div>
@@ -210,17 +218,31 @@ function calc(a,amount){
   if(a.mode==="cash"){const pay=amount*st[0].k;const rows=st.map(b=>pay/b.k);const tot=rows.reduce((x,y)=>x+y,0);return{rows,profit:pay-tot,pct:(pay-tot)/tot*100}}
   const t=amount*(st[0].k-1);const rows=[amount,...st.slice(1).map(b=>t/b.k)];const hedge=rows.slice(1).reduce((x,y)=>x+y,0);
   return{rows,profit:t-hedge,pct:(t-hedge)/amount*100}}
-function card(a){
+let PIN={};try{PIN=JSON.parse(localStorage.getItem("arbpin")||"{}")||{}}catch(e){}
+function savePin(){try{localStorage.setItem("arbpin",JSON.stringify(PIN))}catch(e){}}
+const PIN_GONE=3600;
+function pinSync(){const now=Date.now()/1000;let ch=false;
+  for(const id in PIN){const p=PIN[id],cur=DATA&&DATA.arbs.find(x=>x.id===id);
+    if(cur){p.a=cur;p.seen=now;ch=true}
+    if(p.a.start<now||now-(p.seen||p.saved||now)>PIN_GONE){delete PIN[id];ch=true}}
+  if(ch)savePin()}
+function arbOf(id){return(DATA&&DATA.arbs.find(x=>x.id===id))||(PIN[id]&&PIN[id].a)}
+function renderPins(){
+  const el=document.getElementById("pins"),ids=Object.keys(PIN).sort((x,y)=>PIN[x].a.start-PIN[y].a.start),now=Date.now()/1000;
+  el.innerHTML=ids.length?`<div class="hd2">📌 Сохранённые (${ids.length})</div><div class="sm2">Проверяются при каждом обновлении данных. Пропавшие остаются серыми ещё час, потом убираются; начавшиеся матчи убираются сразу.</div>`+ids.map(id=>{
+    const p=PIN[id],live=DATA&&DATA.arbs.some(x=>x.id===id),m=Math.round((now-(p.seen||now))/60);
+    return card(p.a,live?'<div class="pinst ok">✓ действует, данные свежие</div>':`<div class="pinst bad">⚠ в последнем обновлении не найдена${m>0?" (последний раз видели "+m+" мин назад)":""} — коэффициенты могли измениться</div>`,!live)}).join(""):""}
+function card(a,st,gone){
   const amt=amounts[a.id]||(a.mode==="freebet"?a.base||1000:1000);
   const c=calc(a,amt);
   const names_=names();
   const bets=a.bets.map((b,i)=>`<div class="bet"><span class="bk">${esc(names_[b.bk]||b.bk)}${a.mode==="freebet"&&i===0?" (фрибет)":""}</span><span>${esc(b.o)}</span><span class="k">${b.k.toFixed(2)}</span><span class="st" data-st="${i}">${stk(b,c.rows[i])}</span></div>`).join("");
-  return `<div class="card" data-id="${a.id}"${a.mode==="freebet"?" data-fb":""}><div class="top"><div><div class="ev" data-copy="${esc(a.home)} — ${esc(a.away)}" title="Нажмите, чтобы скопировать название матча" role="button" tabindex="0">${esc(a.home)} — ${esc(a.away)}</div>
+  return `<div class="card${gone?" gone":""}" data-id="${a.id}"${a.mode==="freebet"?" data-fb":""}><div class="top"><div><div class="ev" data-copy="${esc(a.home)} — ${esc(a.away)}" title="Нажмите, чтобы скопировать название матча" role="button" tabindex="0">${esc(a.home)} — ${esc(a.away)}</div>
   <div class="meta">${esc(a.league)} // ${esc(a.sport)}</div><div class="meta"><b>${when(a.start)}</b></div></div>
   <div class="pct${a.mode==="cash"&&a.pct>5?" hi":""}">${a.pct.toFixed(2)}%</div></div>
   <div class="bets">${bets}</div>
   <div class="calc"><span>${a.mode==="freebet"?"Размер фрибета":"Сумма на 1-ю ставку"}:</span><input type="number" min="1" step="100" value="${Math.round(amt)}" data-amt="${a.id}"><span>Прибыль: <b data-prof>${money(c.profit)}</b> (${c.pct.toFixed(1)}%)</span></div>
-  ${a.mode==="cash"&&a.pct>5?'<div class="warn">⚠️ Высокая вилка — перед ставкой проверьте коэффициенты вручную</div>':""}</div>`}
+  ${a.mode==="cash"&&a.pct>5?'<div class="warn">⚠️ Высокая вилка — перед ставкой проверьте коэффициенты вручную</div>':""}${st||""}<button class="pinb${PIN[a.id]?" on":""}" data-pin="${a.id}">${PIN[a.id]?"📌 сохранена — убрать":"📌 сохранить"}</button></div>`}
 function render(){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.m===mode));
   document.getElementById("today").classList.toggle("on",today);
@@ -229,6 +251,7 @@ function render(){
   const dot=document.getElementById("dot");dot.className="dot"+(age>1200?" dead":age>STALE?" old":"");
   document.getElementById("st").textContent=age<90?"обновлено только что":`обновлено ${Math.round(age/60)} мин назад`;
   document.getElementById("banner").innerHTML=age>STALE?`<div class="banner">Данные не обновлялись ${Math.round(age/60)} мин — бот на телефоне, возможно, остановлен или БК недоступны. Коэффициенты могли устареть.</div>`:"";
+  pinSync();
   const all=DATA.arbs.filter(a=>a.mode===mode);
   const nm=names(),all_=Object.keys(nm).filter(k=>k!=="fonbet"||true),c1={},c2={};
   all.forEach(a=>{if(a.bets[0])c1[a.bets[0].bk]=(c1[a.bets[0].bk]||0)+1;if(a.bets[1])c2[a.bets[1].bk]=(c2[a.bets[1].bk]||0)+1});
@@ -244,12 +267,16 @@ function render(){
   const s=document.getElementById("sort").value;
   list.sort(s==="pct"?(x,y)=>y.pct-x.pct:(x,y)=>x.start-y.start||y.pct-x.pct);
   document.getElementById("count").textContent=`Найдено: ${list.length}`;
-  document.getElementById("list").innerHTML=list.length?list.map(card).join(""):'<div class="empty">Подходящих вилок сейчас нет</div>';
+  document.getElementById("list").innerHTML=list.length?list.map(a=>card(a)).join(""):'<div class="empty">Подходящих вилок сейчас нет</div>';
+  renderPins();
   document.querySelectorAll("[data-amt]").forEach(inp=>inp.oninput=()=>{
-    const a=DATA.arbs.find(x=>x.id===inp.dataset.amt);const v=parseFloat(inp.value);if(!a||!(v>0))return;
+    const a=arbOf(inp.dataset.amt);const v=parseFloat(inp.value);if(!a||!(v>0))return;
     amounts[a.id]=v;save();const c=calc(a,v),card=inp.closest(".card");
     card.querySelectorAll("[data-st]").forEach(e=>e.textContent=stk(a.bets[+e.dataset.st],c.rows[+e.dataset.st]));
     card.querySelector("[data-prof]").parentElement.innerHTML=`Прибыль: <b data-prof>${money(c.profit)}</b> (${c.pct.toFixed(1)}%)`})}
+document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-pin]");if(!b)return;
+  const id=b.dataset.pin;if(PIN[id])delete PIN[id];else{const a=arbOf(id);if(a)PIN[id]={a,saved:Date.now()/1000,seen:Date.now()/1000}}
+  savePin();render()});
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{mode=t.dataset.m;bk1.clear();bk2.clear();save();render()});
 document.getElementById("today").onclick=()=>{today=!today;save();render()};
 document.getElementById("minp").onchange=()=>{minp[mode]=parseFloat(document.getElementById("minp").value)||0;save();render()};
@@ -272,16 +299,16 @@ async function admApi(method,body){
   if(r.status===404&&method==="GET")return null;
   if(!r.ok)throw new Error(r.status===401||r.status===403?"токен не подходит (нужен доступ Contents: Read and write к этому репозиторию)":"GitHub: "+r.status);
   return r.json()}
-async function admLoad(){try{admSt("Загружаю…");const j=await admApi("GET");const d=j?JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g,""))))):{};ADMD={freebet:d.bk_odds||{},cash:d.bk_odds_cash||{}};admRows(ADMD[ADMM]);admSt(j?"Загружены текущие настройки.":"Настроек пока нет — всё без ограничений.")}catch(e){admSt(e.message,1)}}
+async function admLoad(){try{admSt("Загружаю…");const j=await admApi("GET");const d=j?JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g,""))))):{};ADMD={freebet:d.bk_odds||{},cash:d.bk_odds_cash||{}};admEl("admdays").value=d.horizon_days?String(d.horizon_days):"";admRows(ADMD[ADMM]);admSt(j?"Загружены текущие настройки.":"Настроек пока нет — всё без ограничений.")}catch(e){admSt(e.message,1)}}
 async function admSave(){try{
   admSt("Сохраняю…");admStash();const bk_odds=ADMD.freebet,bk_odds_cash=ADMD.cash;
   for(const o of [bk_odds,bk_odds_cash])for(const k in o){const r=o[k];if(r.min&&r.max&&r.min>r.max)throw new Error("«"+(ADM_BKS[k]||k)+"»: «от» больше «до»")}
-  const cur=await admApi("GET");const body={message:"settings",branch:BR,content:b64u(JSON.stringify({bk_odds,bk_odds_cash,updated:Math.floor(Date.now()/1000)}))};if(cur)body.sha=cur.sha;
+  const cur=await admApi("GET");const body={message:"settings",branch:BR,content:b64u(JSON.stringify({bk_odds,bk_odds_cash,horizon_days:parseInt(admEl("admdays").value)||0,updated:Math.floor(Date.now()/1000)}))};if(cur)body.sha=cur.sha;
   await admApi("PUT",body);try{localStorage.setItem("arbadm",admEl("admtok").value.trim())}catch(e){}
   admSt("Сохранено. Телефон применит настройки в течение ~30 секунд.")}catch(e){admSt(e.message,1)}}
 admEl("admopen").onclick=admEl("admopen2").onclick=e=>{e.preventDefault();let t="";try{t=localStorage.getItem("arbadm")||""}catch(x){}admEl("admtok").value=t;ADMD={freebet:{},cash:{}};ADMM="freebet";admEl("admtf").classList.add("on");admEl("admtc").classList.remove("on");admRows({});admEl("adm").style.display="block";admSt("");if(t){admLoad();phLoad()}};
 
-const PH_BKS=["betcity","betboom","ligastavok","leon","olimp","marathon","onewin","polymarket"];
+const PH_BKS=["fonbet","winline","betcity","betboom","ligastavok","leon","olimp","marathon","onewin","polymarket"];
 let PHA={},PHSHA=null;
 const phEl=admEl("phst");function phSt(t,bad){phEl.textContent=t;phEl.style.color=bad?"var(--bad)":"var(--mut)"}
 async function ghGet(path,raw){const tok=admEl("admtok").value.trim();if(!tok)throw new Error("введите токен GitHub");
