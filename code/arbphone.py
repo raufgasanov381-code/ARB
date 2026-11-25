@@ -120,6 +120,8 @@ DEFAULTS = {
     "worker_interval": 120,     # период цикла работника, сек
     "auto_update": None,        # автообновление кода из репозитория: у работника по умолчанию вкл, у главного выкл (true — включить)
     "update_every": 600,        # как часто проверять новую версию кода, сек
+    "worker_fast_interval": 60, # как часто работник опрашивает Фонбет/Винлайн, сек
+    "remote_fast_age": 420,     # сколько секунд данные Фонбета/Винлайна от работника считаются свежими
     "heartbeat_every": 240,     # как часто телефон обновляет свою карточку на сайте (модель, версия, статус), сек
     "keepalive": True,          # периодически открывать сайты Бетсити/БетБум/Лиги Ставок/Олимпа в браузере телефона (прогрев)
     "keepalive_every": 900,     # как часто, сек
@@ -3649,16 +3651,29 @@ def settings_txt(cfg):
     return "фрибет — %s; денежные — %s" % (_bk_odds_txt(cfg.get("bk_odds") or {}), _bk_odds_txt(cfg.get("bk_odds_cash") or {}))
 
 
+def _days_clean(v):
+    try:
+        d = int(float(v))
+    except (TypeError, ValueError):
+        return 0
+    return d if 1 <= d <= 14 else 0
+
+
 def settings_apply(cfg, data, src):
     new = _bk_odds_clean((data or {}).get("bk_odds"))
     newc = _bk_odds_clean((data or {}).get("bk_odds_cash"))
-    if new == (cfg.get("bk_odds") or {}) and newc == (cfg.get("bk_odds_cash") or {}):
+    days = _days_clean((data or {}).get("horizon_days"))
+    same_days = (not days) or cfg.get("horizon_hours") == days * 24
+    if new == (cfg.get("bk_odds") or {}) and newc == (cfg.get("bk_odds_cash") or {}) and same_days:
         return False
     cfg["bk_odds"], cfg["bk_odds_cash"] = new, newc
-    log("настройки парсера (%s): коэффициенты: %s" % (src, settings_txt(cfg)))
+    if days:
+        cfg["horizon_hours"] = days * 24
+        cfg["betcity_hours"] = 24 if days <= 1 else 48 if days == 2 else 72    # Бетсити отдаёт счётчики только на 24/48/72 ч
+    log("настройки парсера (%s): коэффициенты: %s; горизонт: %s" % (src, settings_txt(cfg), ("%d дн." % days) if days else "как в config"))
     try:
         with open(_settings_file(), "w", encoding="utf-8") as fh:
-            json.dump({"bk_odds": new, "bk_odds_cash": newc}, fh, ensure_ascii=False)
+            json.dump({"bk_odds": new, "bk_odds_cash": newc, "horizon_days": days}, fh, ensure_ascii=False)
     except OSError:
         pass
     return True
@@ -5156,6 +5171,8 @@ def run_cycle(cfg, args, sent):
     ow, t_w1 = [], None
     ma, t_ma = [], None
     pm, t_p = [], None
+    fon_r, t_fr, win_r, t_wr = [], None, [], None
+    doc = msgs = None
     REM = set(cfg.get("remote_bks") or [])
     if cfg.get("auto_remote", True) and not offline and cfg.get("web_repo") and cfg.get("web_token"):
         try:                                                   # БК, по которым у работников есть свежие данные, главный телефон сам не опрашивает
@@ -5264,6 +5281,10 @@ def run_cycle(cfg, args, sent):
                 bc, t_c = _ev, _t
             elif _bk == "betboom":
                 bb, t_b = _ev, _t
+            elif _bk == "fonbet":
+                fon_r, t_fr = _ev, _t
+            elif _bk == "winline":
+                win_r, t_wr = _ev, _t
     if offline:
         doc, msgs = load_har(args)
         t_f = t_w = time.time()
@@ -5304,18 +5325,27 @@ def run_cycle(cfg, args, sent):
                     elif m and int(m.group(1)) == (w.get("kid") or 0):
                         w["markets"].update(bc_ext_markets(r, w["kid"], "CRN:"))
     else:
-        doc = fonbet_fetch(cfg)
-        t_f = time.time()
-        msgs = winline_fetch(cfg)
-        t_w = time.time()
-        if abs(t_w - t_f) > cfg["max_age"]:
+        if fon_r:                                               # Фонбет опрашивает телефон-работник
+            t_f = t_fr
+        else:
+            doc = fonbet_fetch(cfg)
+            t_f = time.time()
+        if win_r:                                               # Винлайн опрашивает телефон-работник
+            t_w = t_wr
+        else:
+            msgs = winline_fetch(cfg)
+            t_w = time.time()
+        if not fon_r and not win_r and abs(t_w - t_f) > cfg["max_age"]:
             log("снимки БК слишком разнесены по времени — пропускаю цикл")
             return
+        if fon_r or win_r:
+            log("Фонбет: %s, Винлайн: %s" % (("от работника, %d с назад" % (time.time() - t_f)) if fon_r else "на этом телефоне",
+                                             ("от работника, %d с назад" % (time.time() - t_w)) if win_r else "на этом телефоне"))
         if t_b is not None and t_f - t_b > cfg["max_age"]:
             log("БетБум: снимок устарел на %d с — не использую в этом цикле" % (t_f - t_b))
             bb, t_b = [], None
-    fon = fonbet_parse(doc)
-    win = winline_events(msgs)
+    fon = fon_r if doc is None else fonbet_parse(doc)
+    win = win_r if msgs is None else winline_events(msgs)
     if cfg.get("horizon_hours"):                              # только ближайшие матчи — у всех БК
         lim = (args.bc_now or time.time()) + cfg["horizon_hours"] * 3600
         fon, win, bb, bc, lo, ls, ol, pm, ow, ma = ([x for x in lst if x.get("start", 0) <= lim] for lst in (fon, win, bb, bc, lo, ls, ol, pm, ow, ma))
@@ -5921,11 +5951,12 @@ def _web_branch(cfg):
 
 # ============================================================ несколько телефонов: «работник», автообновление, установщик, прогрев сайтов
 
-VERSION = 77
+VERSION = 78
 REMOTE = {"sha": {}, "data": {}}
 WORKER_LAST = {}
 CODE_STATE = {"t": 0.0}
-CL_BKS = ("polymarket", "onewin", "marathon", "olimp", "ligastavok", "leon", "betcity", "betboom")
+CL_BKS = ("polymarket", "onewin", "marathon", "olimp", "ligastavok", "leon", "betcity", "betboom", "fonbet", "winline")
+FAST_BKS = ("fonbet", "winline")                                       # котировки быстро устаревают — у них свой, короткий срок годности
 
 
 def _gh_bytes(cfg, path, timeout=60):
@@ -5993,12 +6024,20 @@ def fetch_bk(cfg, bk):
     if bk == "betboom":
         msgs, names = betboom_fetch(cfg)
         return bb_events(msgs, names, now=time.time()), time.time()
+    if bk == "fonbet":
+        ev = fonbet_parse(fonbet_fetch(cfg))
+        return ev, time.time()
+    if bk == "winline":
+        ev = winline_events(winline_fetch(cfg))
+        return ev, time.time()
     raise ValueError("работник не умеет опрашивать: " + bk)
 
 
 def worker_cycle(cfg):
     wid = cfg.get("worker_id") or "worker"
     for bk in cfg.get("bks") or []:
+        if bk in FAST_BKS:                                      # Фонбет/Винлайн — в отдельном быстром потоке
+            continue
         if bk not in CL_BKS:
             log("работник: неизвестная БК «%s» (доступны: %s)" % (bk, ", ".join(CL_BKS)))
             continue
@@ -6013,6 +6052,8 @@ def worker_cycle(cfg):
             log("работник: %s недоступна: %s: %s" % (bk, type(e).__name__, e))
     if not WORKER_LAST:
         return
+    for k in [k for k in WORKER_LAST if k in FAST_BKS]:
+        del WORKER_LAST[k]
     doc = {"id": wid, "v": VERSION, "t": time.time(), "bk": WORKER_LAST}
     raw = gzip.compress(json.dumps(doc, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8"), 6)
     gh_put(cfg, "workers/%s.json.gz" % re.sub(r"[^\w.-]", "_", wid), raw, "worker " + wid)
@@ -6045,7 +6086,8 @@ def remote_events(cfg, bk):
         d = (doc.get("bk") or {}).get(bk)
         if d and (best is None or d["t"] > best["t"]):
             best = d
-    if not best or time.time() - best["t"] > cfg.get("remote_max_age", 1200):
+    limit = cfg.get("remote_fast_age", 420) if bk in FAST_BKS else cfg.get("remote_max_age", 1200)
+    if not best or time.time() - best["t"] > limit:
         return [], None
     return [e for e in best["ev"] if e.get("start", 0) > time.time()], best["t"]
 
@@ -6194,6 +6236,42 @@ def fleet_sync(cfg):
     return changed
 
 
+FAST = {"bks": [], "run": False, "thread": None, "last": {}}
+
+
+def worker_fast_loop(cfg, wid):
+    """Отдельный поток: Фонбет/Винлайн опрашиваются часто (worker_fast_interval) и публикуются в свой файл — медленные БК их не задерживают."""
+    while True:
+        bks = [b for b in FAST["bks"] if b in FAST_BKS]
+        if not (bks and FAST["run"]):
+            time.sleep(5)
+            continue
+        t0 = time.time()
+        for bk in bks:
+            try:
+                ev, t = fetch_bk(cfg, bk)
+                if ev:
+                    FAST["last"][bk] = {"t": t, "ev": ev}
+                log("работник %s: %s — %d матчей" % (wid, bk, len(ev)))
+            except SystemExit:
+                raise
+            except Exception as e:
+                log("работник: %s недоступна: %s: %s" % (bk, type(e).__name__, e))
+        for k in [k for k in FAST["last"] if k not in bks]:
+            del FAST["last"][k]
+        if FAST["last"]:
+            try:
+                doc = {"id": wid + "-fast", "v": VERSION, "t": time.time(), "bk": FAST["last"]}
+                raw = gzip.compress(json.dumps(doc, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8"), 6)
+                gh_put(cfg, "workers/%s__fast.json.gz" % re.sub(r"[^\w.-]", "_", wid), raw, "fast " + wid)
+                log("работник %s: Фонбет/Винлайн опубликованы, %d КБ" % (wid, len(raw) // 1024))
+            except SystemExit:
+                raise
+            except Exception as e:
+                log("работник: публикация %s: %s" % (type(e).__name__, e))
+        time.sleep(max(5.0, cfg.get("worker_fast_interval", 60) - (time.time() - t0)))
+
+
 def worker_main(cfg):
     if not (cfg.get("web_repo") and cfg.get("web_token")):
         sys.exit("Работнику нужны web_repo и web_token в config.json")
@@ -6211,6 +6289,14 @@ def worker_main(cfg):
             raise
         except Exception as e:
             log("назначения с сайта: %s: %s" % (type(e).__name__, e))
+        if time.time() - state.get("set_t", 0) >= cfg.get("settings_poll", 30):
+            state["set_t"] = time.time()
+            try:
+                settings_sync(cfg)
+            except SystemExit:
+                raise
+            except Exception as e:
+                log("настройки с сайта: %s: %s" % (type(e).__name__, e))
         mine = FLEET["assign"].get(wid) or {}
         bks = [b for b in (mine.get("bks") if "bks" in mine else base_bks) if b in CL_BKS]
         paused = bool(mine.get("paused", False))
@@ -6221,6 +6307,10 @@ def worker_main(cfg):
                     del WORKER_LAST[k]
             due = 0.0
             heartbeat(cfg, wid, "worker", "пауза" if paused else ("ждёт назначения БК с сайта" if not bks else "парсит"), {"bks": bks, "paused": paused}, force=True)
+        FAST["bks"], FAST["run"] = [b for b in bks if b in FAST_BKS], not paused
+        if FAST["thread"] is None:
+            FAST["thread"] = threading.Thread(target=worker_fast_loop, args=(cfg, wid), daemon=True)
+            FAST["thread"].start()
         if sites_thread[0] is None and bks and not paused:
             sites_thread[0] = threading.Thread(target=keepalive_loop, args=(cfg, keepalive_sites(cfg, bks)), daemon=True)
             sites_thread[0].start()
@@ -6235,7 +6325,7 @@ def worker_main(cfg):
             except Exception as e:
                 log("ошибка цикла работника: %s: %s" % (type(e).__name__, e))
             due = time.time() + max(5.0, cfg.get("worker_interval", 120) - (time.time() - t0))
-            heartbeat(cfg, wid, "worker", "парсит", {"bks": bks, "paused": False, "counts": {k: len(v["ev"]) for k, v in WORKER_LAST.items()},
+            heartbeat(cfg, wid, "worker", "парсит", {"bks": bks, "paused": False, "counts": {k: len(v["ev"]) for k, v in list(WORKER_LAST.items()) + list(FAST["last"].items())},
                                                      "cycle": int(time.time() - t0)})
         elif not bks or paused:
             heartbeat(cfg, wid, "worker", "пауза" if paused else "ждёт назначения БК с сайта", {"bks": bks, "paused": paused})
