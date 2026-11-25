@@ -1,1 +1,1 @@
-{"model": "realme RMX3195", "android": "13", "id": "tel2", "role": "worker", "v": 77, "t": 1795630526, "started": 1795628038, "status": "парсит", "bks": ["leon", "marathon", "ligastavok", "betboom", "betcity"], "paused": false}
+{"model": "realme RMX3195", "android": "13", "id": "tel2", "role": "worker", "v": 77, "t": 1795631332, "started": 1795628038, "status": "парсит", "bks": ["leon", "marathon", "ligastavok", "betboom", "betcity"], "paused": false, "counts": {"leon": 2348, "marathon": 696, "ligastavok": 1219, "betboom": 813}, "cycle": 802}
